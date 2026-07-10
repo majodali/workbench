@@ -1,11 +1,11 @@
 /**
- * End-to-end smoke test: serves the repo, opens the editor in headless
- * Chromium, and exercises the sample project — shared namespace, data
- * components, computed values, handlers, custom elements, script runs,
- * imports, reload, and error reporting.
+ * End-to-end smoke test: serves the BUILT app (frontend/dist), opens the
+ * editor in headless Chromium, and exercises the sample project — shared
+ * namespace, data components, computed values, handlers, custom elements,
+ * script runs, imports, reload, and error reporting.
  *
- * Run with `npm test`. Chromium is resolved from $CHROME_PATH, a Playwright
- * browsers directory, or playwright-core's own registry.
+ * Run with `npm test` (which builds first). Chromium is resolved from
+ * $CHROME_PATH, a Playwright browsers directory, or playwright-core's registry.
  */
 
 const http = require('http');
@@ -13,7 +13,12 @@ const fs = require('fs');
 const path = require('path');
 const { chromium } = require('playwright-core');
 
-const ROOT = path.resolve(__dirname, '..');
+const ROOT = path.resolve(__dirname, '..', 'frontend', 'dist');
+
+if (!fs.existsSync(path.join(ROOT, 'index.html'))) {
+  console.error('frontend/dist not found — run `npm run build:frontend` first (or use `npm test`).');
+  process.exit(2);
+}
 
 const MIME = {
   '.html': 'text/html',

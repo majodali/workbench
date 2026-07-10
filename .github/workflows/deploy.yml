@@ -1,0 +1,71 @@
+name: Deploy
+
+# Deploys the app to AWS on push to main (and via the Run workflow button).
+# Auth uses GitHub OIDC — no long-lived AWS keys are stored in the repo.
+# See docs/CI_DEPLOY.md for the one-time AWS role + repo variables setup.
+
+on:
+  workflow_dispatch: {}
+  push:
+    branches: [main]
+    paths:
+      - "frontend/**"
+      - "infra/**"
+      - "package.json"
+      - "package-lock.json"
+      - ".github/workflows/deploy.yml"
+
+concurrency:
+  group: deploy-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  id-token: write # request the OIDC token
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: production
+    env:
+      AWS_REGION: ${{ vars.AWS_REGION || 'us-east-1' }}
+      CDK_DEFAULT_REGION: ${{ vars.AWS_REGION || 'us-east-1' }}
+      APP_NAME: ${{ vars.APP_NAME }}
+      HOSTING_MODE: ${{ vars.HOSTING_MODE || 'cloudfront' }}
+      DOMAIN_NAME: ${{ vars.DOMAIN_NAME }}
+      INCLUDE_WWW: ${{ vars.INCLUDE_WWW || 'false' }}
+      SITE_BUCKET_NAME: ${{ vars.SITE_BUCKET_NAME }}
+      SITE_PATH_PREFIX: ${{ vars.SITE_PATH_PREFIX }}
+      SITE_BASE_URL: ${{ vars.SITE_BASE_URL }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+      - run: npm ci
+      - name: Typecheck
+        run: npm run typecheck
+      - name: Build frontend
+        run: npm run build:frontend
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+      - name: Bootstrap CDK (idempotent)
+        working-directory: infra
+        run: npx cdk bootstrap
+      - name: Deploy
+        working-directory: infra
+        run: npx cdk deploy --require-approval never --outputs-file cdk-outputs.json
+      - name: Show stack outputs
+        if: always()
+        working-directory: infra
+        run: |
+          if [ -f cdk-outputs.json ]; then
+            echo "### Deployed :rocket:" >> "$GITHUB_STEP_SUMMARY"
+            echo '```json' >> "$GITHUB_STEP_SUMMARY"
+            cat cdk-outputs.json >> "$GITHUB_STEP_SUMMARY"
+            echo '```' >> "$GITHUB_STEP_SUMMARY"
+          fi

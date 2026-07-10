@@ -24,22 +24,30 @@ shell around the page runtime.
 
 ## Quick start
 
-No build step. Serve the repo root with any static server:
-
-```sh
-npm start        # python3 -m http.server 8000
-```
-
-Open <http://localhost:8000>. The editor loads a sample counter project that
-exercises every component kind: click the counter buttons, run the
-“reset count” script, edit the definitions and press **⟳ reload page**.
-
-Run the end-to-end test (headless Chromium via playwright-core):
-
 ```sh
 npm install
-npm test
+npm run dev        # Vite dev server for the editor
 ```
+
+The editor loads a sample counter project that exercises every component kind:
+click the counter buttons, run the “reset count” script, edit the definitions
+and press **⟳ reload page**.
+
+Other commands (the scripts contract follows
+[majodali/serverless-web-app-template](https://github.com/majodali/serverless-web-app-template)):
+
+```sh
+npm run typecheck        # tsc over frontend (checkJs) and infra
+npm run build:frontend   # production build to frontend/dist
+npm test                 # build + end-to-end smoke test in headless Chromium
+npm run synth            # synthesize the CloudFormation (no AWS needed)
+npm run deploy           # build + cdk deploy (see DEPLOY.md)
+```
+
+To deploy, see **[DEPLOY.md](./DEPLOY.md)** (local) or
+**[docs/CI_DEPLOY.md](./docs/CI_DEPLOY.md)** (GitHub Actions + OIDC —
+including `existing-bucket` mode for deploying into a sub-folder of an
+existing site).
 
 ## Design decisions
 
@@ -115,18 +123,34 @@ mutating them, so “what triggered this change?” stays answerable.
 
 ## Architecture
 
+The repo follows the
+[serverless-web-app-template](https://github.com/majodali/serverless-web-app-template)
+layout (npm workspaces; `backend/` will be added when backend services land):
+
 ```
-index.html, css/, src/editor/   the editor shell (lit-html UI, no user code)
-        │  postMessage: load-project / run-executable
-        │              ready / loaded / console / data-change / ran
-        ▼
-runtime/page.html + runtime.js  the page realm (sandboxed iframe)
-├── evaluate.js                 acorn parse → with(scope) compile → invoke
-├── data.js                     DataComponent / DataRegistry (+computed)
-└── ui.js                       defineComponent (custom elements + lit-html)
-vendor/                         lit-html and acorn, vendored (buildless)
+frontend/
+├── index.html, src/editor/     the editor shell (lit-html UI, no user code)
+│           │  postMessage: load-project / run-executable
+│           │              ready / loaded / console / data-change / ran
+│           ▼
+└── public/                     served VERBATIM (never bundled):
+    ├── runtime/page.html + runtime.js   the page realm (sandboxed iframe)
+    │   ├── evaluate.js         acorn parse → with(scope) compile → invoke
+    │   ├── data.js             DataComponent / DataRegistry (+computed)
+    │   └── ui.js               defineComponent (custom elements + lit-html)
+    └── vendor/                 lit-html and acorn for the page realm
+infra/                          AWS CDK: publishes frontend/dist per hosting mode
 tests/smoke.js                  end-to-end test in headless Chromium
+.github/workflows/              CI (PR checks) and Deploy (OIDC, on main)
 ```
+
+The split matters: the **editor** is bundled by Vite like a normal app, but
+`frontend/public/runtime/` and `frontend/public/vendor/` are copied verbatim —
+the page realm loads them by URL on every reload, and **user executables can
+import them by URL too** (e.g. `import '../vendor/lit-html/lit-html.js'`), so
+they must stay plain ESM at stable, unhashed paths. The two realms each get
+their own lit-html instance, which is fine — they never share objects, only
+postMessage.
 
 Boot sequence on load/reload: render page HTML into the iframe → build the
 shared scope and inject the runtime API → create declared data components →
@@ -150,6 +174,10 @@ run definition executables in order → attach handlers → report `loaded`.
 
 ## Roadmap
 
+- **Backend services** — a `backend/` workspace following the template's
+  pattern (Lambda + API Gateway + DynamoDB); `infra/` and the deploy pipeline
+  are already shaped for it, and `config.json` is the slot where the API URL
+  will surface.
 - **Canvas scene graph** — multiple graphic components per canvas with draw
   order, invalidation, and hit-testing so pointer events route to the right
   component. The interface will mirror `defineComponent`.

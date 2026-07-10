@@ -4,13 +4,16 @@
  * postMessage. All user code executes in the iframe, never here.
  */
 
-import { html, render, nothing } from '../../vendor/lit-html/lit-html.js';
-import { live } from '../../vendor/lit-html/directives/live.js';
-import { repeat } from '../../vendor/lit-html/directives/repeat.js';
-import { classMap } from '../../vendor/lit-html/directives/class-map.js';
+import { html, render, nothing } from 'lit-html';
+import { live } from 'lit-html/directives/live.js';
+import { repeat } from 'lit-html/directives/repeat.js';
+import { classMap } from 'lit-html/directives/class-map.js';
 import { sampleProject, emptyProject } from './samples.js';
+import './editor.css';
 
-const STORAGE_KEY = 'notebook-project';
+// Namespaced by base path: when deployed under a sub-folder of a shared
+// domain, this app must not collide with other apps' localStorage.
+const STORAGE_KEY = `notebook-project:${new URL('.', location.href).pathname}`;
 const PAGE_ITEM = '__page__';
 
 // ---------------------------------------------------------------------------
@@ -65,7 +68,8 @@ function selected() {
 // ---------------------------------------------------------------------------
 // Runtime iframe messaging
 
-const iframe = () => document.getElementById('page-frame');
+const iframe = () =>
+  /** @type {HTMLIFrameElement | null} */ (document.getElementById('page-frame'));
 
 function postToRuntime(msg) {
   iframe()?.contentWindow?.postMessage({ source: 'nb-editor', ...msg }, '*');
