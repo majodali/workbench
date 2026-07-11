@@ -1,5 +1,5 @@
 {
-  "name": "notebook-workbench",
+  "name": "contraption",
   "version": "0.1.0",
   "private": true,
   "description": "Interactive page-based development environment: executables with a shared namespace, observable data components, and lit-html UI components.",

@@ -28,7 +28,7 @@ import { ifDefined } from '../vendor/lit-html/directives/if-defined.js';
 import { ref } from '../vendor/lit-html/directives/ref.js';
 import { unsafeHTML } from '../vendor/lit-html/directives/unsafe-html.js';
 
-const post = (msg) => window.parent.postMessage({ source: 'nb-runtime', ...msg }, '*');
+const post = (msg) => window.parent.postMessage({ source: 'contraption-runtime', ...msg }, '*');
 
 // ---------------------------------------------------------------------------
 // Serialization for console output and the data inspector.
@@ -248,7 +248,7 @@ async function boot(project) {
 
 window.addEventListener('message', async (e) => {
   const msg = e.data;
-  if (!msg || msg.source !== 'nb-editor') return;
+  if (!msg || msg.source !== 'contraption-editor') return;
 
   if (msg.type === 'load-project') {
     try {

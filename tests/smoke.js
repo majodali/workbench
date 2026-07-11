@@ -1,6 +1,7 @@
 /**
- * End-to-end smoke test: serves the BUILT app (frontend/dist), opens the
- * editor in headless Chromium, and exercises the sample project — shared
+ * End-to-end smoke test for Contraption: serves the BUILT app
+ * (frontend/dist), opens the editor in headless Chromium, and exercises the
+ * sample project — shared
  * namespace, data components, computed values, handlers, custom elements,
  * script runs, imports, reload, and error reporting.
  *

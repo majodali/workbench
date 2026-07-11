@@ -65,13 +65,13 @@ Variables:
 
 | Variable           | Value                                                       |
 | ------------------ | ----------------------------------------------------------- |
-| `APP_NAME`         | Short app name (e.g. `notebook`)                            |
+| `APP_NAME`         | Short app name (e.g. `contraption`)                         |
 | `AWS_REGION`       | Region to deploy in (`us-east-1` if custom domain)          |
 | `HOSTING_MODE`     | `cloudfront` (default) or `existing-bucket`                 |
 | `DOMAIN_NAME`      | (cloudfront) custom domain, or unset for the CloudFront URL |
 | `INCLUDE_WWW`      | (cloudfront) `true` / `false`                               |
 | `SITE_BUCKET_NAME` | (existing-bucket) the existing site bucket                  |
-| `SITE_PATH_PREFIX` | (existing-bucket) sub-folder, e.g. `notebook`               |
+| `SITE_PATH_PREFIX` | (existing-bucket) sub-folder, e.g. `contraption`            |
 | `SITE_BASE_URL`    | (existing-bucket) public URL, for the deploy output         |
 
 For deploying into an existing site, set `HOSTING_MODE=existing-bucket`,

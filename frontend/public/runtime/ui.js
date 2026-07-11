@@ -29,7 +29,7 @@ export function makeDefineComponent(reportError) {
       return existing;
     }
 
-    class NotebookComponent extends HTMLElement {
+    class ContraptionComponent extends HTMLElement {
       constructor() {
         super();
         this._root = shadow ? this.attachShadow({ mode: 'open' }) : this;
@@ -79,7 +79,7 @@ export function makeDefineComponent(reportError) {
       }
     }
 
-    customElements.define(tag, NotebookComponent);
-    return NotebookComponent;
+    customElements.define(tag, ContraptionComponent);
+    return ContraptionComponent;
   };
 }

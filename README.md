@@ -1,6 +1,7 @@
-# Notebook — an interactive page-based development environment
+# Contraption — an interactive page-based development environment
 
-A browser-based environment, in the spirit of coding notebooks, where each
+Build pages like machines: wire parts together and watch them run. Contraption
+is a browser-based environment, in the spirit of coding notebooks, where each
 project is built around a **page**. The page is assembled from components you
 can view, edit, and run live:
 

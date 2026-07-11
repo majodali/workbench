@@ -13,7 +13,7 @@ import './editor.css';
 
 // Namespaced by base path: when deployed under a sub-folder of a shared
 // domain, this app must not collide with other apps' localStorage.
-const STORAGE_KEY = `notebook-project:${new URL('.', location.href).pathname}`;
+const STORAGE_KEY = `contraption-project:${new URL('.', location.href).pathname}`;
 const PAGE_ITEM = '__page__';
 
 // ---------------------------------------------------------------------------
@@ -72,7 +72,7 @@ const iframe = () =>
   /** @type {HTMLIFrameElement | null} */ (document.getElementById('page-frame'));
 
 function postToRuntime(msg) {
-  iframe()?.contentWindow?.postMessage({ source: 'nb-editor', ...msg }, '*');
+  iframe()?.contentWindow?.postMessage({ source: 'contraption-editor', ...msg }, '*');
 }
 
 function reloadPage() {
@@ -92,7 +92,7 @@ function runComponent(c) {
 
 window.addEventListener('message', (e) => {
   const msg = e.data;
-  if (!msg || msg.source !== 'nb-runtime') return;
+  if (!msg || msg.source !== 'contraption-runtime') return;
 
   switch (msg.type) {
     case 'ready':
@@ -446,7 +446,7 @@ function consolePanelView() {
 function toolbarView() {
   return html`
     <header class="toolbar">
-      <span class="logo">◳ notebook</span>
+      <span class="logo">⚙ contraption</span>
       <input
         class="project-name"
         .value=${live(state.project.name ?? '')}

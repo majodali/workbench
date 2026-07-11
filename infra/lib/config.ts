@@ -24,11 +24,11 @@ export interface AppConfig {
 }
 
 function sanitize(name: string): string {
-  return name.replace(/[^a-zA-Z0-9-]/g, "-").replace(/^-+|-+$/g, "") || "notebook";
+  return name.replace(/[^a-zA-Z0-9-]/g, "-").replace(/^-+|-+$/g, "") || "contraption";
 }
 
 export function loadConfig(): AppConfig {
-  const appName = sanitize(process.env.APP_NAME?.trim() || "notebook");
+  const appName = sanitize(process.env.APP_NAME?.trim() || "contraption");
   const hostingMode: HostingMode =
     process.env.HOSTING_MODE === "existing-bucket" ? "existing-bucket" : "cloudfront";
 
