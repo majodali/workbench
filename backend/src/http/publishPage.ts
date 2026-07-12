@@ -76,6 +76,9 @@ export const handler: APIGatewayProxyHandlerV2 = async (
     return ok({ page: toPublicPage(page, env.pagesPrefix) });
   } catch (err) {
     console.error("publishPage error", err);
-    return serverError();
+    // Publishing touches S3/DynamoDB with scoped permissions; surface the AWS
+    // error code (not the details) so failures are diagnosable from the UI.
+    const code = (err as { name?: string })?.name || "InternalError";
+    return serverError(`publish failed: ${code} (details in CloudWatch)`);
   }
 };

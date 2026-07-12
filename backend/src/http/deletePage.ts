@@ -33,6 +33,7 @@ export const handler: APIGatewayProxyHandlerV2 = async (
     return ok({ ok: true });
   } catch (err) {
     console.error("deletePage error", err);
-    return serverError();
+    const code = (err as { name?: string })?.name || "InternalError";
+    return serverError(`delete failed: ${code} (details in CloudWatch)`);
   }
 };
