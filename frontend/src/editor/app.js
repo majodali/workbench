@@ -9,6 +9,7 @@ import { live } from 'lit-html/directives/live.js';
 import { repeat } from 'lit-html/directives/repeat.js';
 import { classMap } from 'lit-html/directives/class-map.js';
 import { sampleProject, emptyProject } from './samples.js';
+import { api, ApiError, getToken, setToken, fetchPublishedProject } from './api.js';
 import './editor.css';
 
 // Namespaced by base path: when deployed under a sub-folder of a shared
@@ -26,6 +27,17 @@ const state = {
   dataValues: {},
   pageStatus: 'loading', // loading | running
   stale: false, // definitions changed since last reload
+  user: null, // signed-in user (from /auth/me), null when logged out
+  publish: {
+    open: false,
+    slug: '',
+    title: '',
+    busy: false,
+    error: null,
+    publishedPath: null, // site-relative URL after a successful publish
+    pages: null, // my published pages, once listed
+  },
+  login: { username: '', password: '', busy: false, error: null },
 };
 
 function loadProject() {
@@ -214,6 +226,121 @@ function replaceProject(doc) {
     state.console = [];
   });
   reloadPage();
+}
+
+// ---------------------------------------------------------------------------
+// Auth + publishing
+
+function slugify(name) {
+  return String(name || '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 63);
+}
+
+async function restoreSession() {
+  if (!getToken()) return;
+  try {
+    const { user } = await api.me();
+    state.user = user;
+  } catch (err) {
+    if (err instanceof ApiError && (err.status === 401 || err.status === 404)) setToken(null);
+  }
+  update();
+}
+
+async function doLogin() {
+  state.login.busy = true;
+  state.login.error = null;
+  update();
+  try {
+    const { token, user } = await api.login(state.login.username.trim(), state.login.password);
+    setToken(token);
+    state.user = user;
+    state.login = { username: '', password: '', busy: false, error: null };
+  } catch (err) {
+    state.login.busy = false;
+    state.login.error = err.message;
+  }
+  update();
+}
+
+function doLogout() {
+  setToken(null);
+  state.user = null;
+  state.publish.pages = null;
+  update();
+}
+
+function openPublish() {
+  state.publish.open = true;
+  state.publish.error = null;
+  state.publish.publishedPath = null;
+  if (!state.publish.slug) state.publish.slug = slugify(state.project.name);
+  if (!state.publish.title) state.publish.title = state.project.name ?? '';
+  update();
+  if (state.user) refreshPages();
+}
+
+async function refreshPages() {
+  try {
+    const { pages } = await api.listPages();
+    state.publish.pages = pages;
+  } catch {
+    state.publish.pages = null;
+  }
+  update();
+}
+
+async function doPublish() {
+  const p = state.publish;
+  p.busy = true;
+  p.error = null;
+  p.publishedPath = null;
+  update();
+  try {
+    const { page } = await api.publish(p.slug.trim(), p.title.trim(), state.project);
+    p.publishedPath = page.path;
+    refreshPages();
+  } catch (err) {
+    p.error = err.message;
+  }
+  p.busy = false;
+  update();
+}
+
+async function deletePublished(page) {
+  if (!confirm(`Delete the published page "${page.slug}"? The URL will stop working.`)) return;
+  try {
+    await api.deletePage(page.slug);
+    if (state.publish.publishedPath === page.path) state.publish.publishedPath = null;
+    refreshPages();
+  } catch (err) {
+    state.publish.error = err.message;
+    update();
+  }
+}
+
+async function openPublishedInEditor(path) {
+  try {
+    const project = await fetchPublishedProject(path);
+    replaceProject(project);
+    state.publish.open = false;
+    update();
+  } catch (err) {
+    state.publish.error = err.message;
+    update();
+  }
+}
+
+/** Support #open=/p/slug/ links — reopen any published page for editing. */
+function handleOpenHash() {
+  const match = location.hash.match(/^#open=(.+)$/);
+  if (!match) return;
+  const path = decodeURIComponent(match[1]);
+  history.replaceState(null, '', location.pathname + location.search);
+  openPublishedInEditor(path);
 }
 
 // ---------------------------------------------------------------------------
@@ -443,6 +570,116 @@ function consolePanelView() {
   `;
 }
 
+function loginFormView() {
+  const l = state.login;
+  return html`
+    <p class="hint">Sign in to publish. Accounts are created by the site admin.</p>
+    <label class="field-label">username</label>
+    <input class="modal-input" .value=${live(l.username)} @input=${(e) => (l.username = e.target.value)} />
+    <label class="field-label">password</label>
+    <input
+      class="modal-input"
+      type="password"
+      .value=${live(l.password)}
+      @input=${(e) => (l.password = e.target.value)}
+      @keydown=${(e) => e.key === 'Enter' && doLogin()}
+    />
+    ${l.error ? html`<p class="modal-error">${l.error}</p>` : nothing}
+    <div class="modal-actions">
+      <button class="primary" ?disabled=${l.busy || !l.username || !l.password} @click=${doLogin}>
+        ${l.busy ? 'signing in…' : 'sign in'}
+      </button>
+    </div>
+  `;
+}
+
+function publishFormView() {
+  const p = state.publish;
+  return html`
+    <p class="hint">
+      Signed in as <strong>${state.user.displayName}</strong>
+      <button class="mini" @click=${doLogout}>sign out</button>
+    </p>
+    <label class="field-label">page URL slug — becomes ${location.origin}/p/&lt;slug&gt;/</label>
+    <input
+      class="modal-input"
+      placeholder="my-page"
+      .value=${live(p.slug)}
+      @input=${(e) => {
+        p.slug = e.target.value;
+        update();
+      }}
+    />
+    <label class="field-label">title</label>
+    <input class="modal-input" .value=${live(p.title)} @input=${(e) => (p.title = e.target.value)} />
+    ${p.error ? html`<p class="modal-error">${p.error}</p>` : nothing}
+    ${p.publishedPath
+      ? html`<p class="modal-success">
+          Published →
+          <a href=${p.publishedPath} target="_blank" rel="noopener">${location.origin}${p.publishedPath}</a>
+        </p>`
+      : nothing}
+    <div class="modal-actions">
+      <button class="primary" ?disabled=${p.busy || !p.slug.trim()} @click=${doPublish}>
+        ${p.busy ? 'publishing…' : 'publish'}
+      </button>
+    </div>
+    ${p.pages?.length
+      ? html`
+          <div class="panel-title" style="padding-left:0">my published pages</div>
+          <table class="pages-table">
+            ${p.pages.map(
+              (page) => html`
+                <tr>
+                  <td><a href=${page.path} target="_blank" rel="noopener">/p/${page.slug}/</a></td>
+                  <td class="pages-title">${page.title}</td>
+                  <td class="pages-actions">
+                    <button class="mini" title="Load into the editor" @click=${() => openPublishedInEditor(page.path)}>
+                      edit
+                    </button>
+                    <button class="mini danger" @click=${() => deletePublished(page)}>delete</button>
+                  </td>
+                </tr>
+              `
+            )}
+          </table>
+        `
+      : nothing}
+  `;
+}
+
+function publishModalView() {
+  if (!state.publish.open) return nothing;
+  return html`
+    <div
+      class="modal-backdrop"
+      @click=${(e) => {
+        if (e.target === e.currentTarget) {
+          state.publish.open = false;
+          update();
+        }
+      }}
+    >
+      <div class="modal">
+        <div class="modal-header">
+          <span class="editor-title">publish page</span>
+          <span class="spacer"></span>
+          <button
+            class="mini"
+            @click=${() => {
+              state.publish.open = false;
+              update();
+            }}
+          >
+            ✕
+          </button>
+        </div>
+        ${state.user ? publishFormView() : loginFormView()}
+      </div>
+    </div>
+  `;
+}
+
 function toolbarView() {
   return html`
     <header class="toolbar">
@@ -457,6 +694,9 @@ function toolbarView() {
       </button>
       <span class="status ${state.pageStatus}">${state.pageStatus}</span>
       <span class="spacer"></span>
+      <button title="Publish this page to the site" @click=${openPublish}>
+        ↗ publish${state.user ? '' : ' (sign in)'}
+      </button>
       <button @click=${exportProject}>export</button>
       <label class="button-like">
         import
@@ -490,6 +730,7 @@ function appView() {
         ${dataPanelView()} ${consolePanelView()}
       </div>
     </main>
+    ${publishModalView()}
   `;
 }
 
@@ -500,3 +741,5 @@ function update() {
 }
 
 update();
+restoreSession();
+handleOpenHash();

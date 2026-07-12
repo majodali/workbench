@@ -25,11 +25,13 @@ jobs:
           node-version: "20"
           cache: "npm"
       - run: npm ci
-      - name: Typecheck (frontend, infra)
+      - name: Typecheck (backend, frontend, infra)
         run: npm run typecheck
       - name: Build frontend
         run: npm run build:frontend
-      - name: CDK synth
+      - name: Build viewer template
+        run: npm run build:viewer
+      - name: CDK synth (bundles all Lambdas)
         working-directory: infra
         run: npx cdk synth --quiet
       - name: Browser smoke test (built app)

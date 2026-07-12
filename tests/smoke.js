@@ -32,8 +32,9 @@ const MIME = {
 
 function startServer() {
   const server = http.createServer((req, res) => {
-    const urlPath = decodeURIComponent(new URL(req.url, 'http://x').pathname);
-    let file = path.join(ROOT, urlPath === '/' ? 'index.html' : urlPath);
+    let urlPath = decodeURIComponent(new URL(req.url, 'http://x').pathname);
+    if (urlPath.endsWith('/')) urlPath += 'index.html';
+    let file = path.join(ROOT, urlPath);
     if (!file.startsWith(ROOT)) {
       res.writeHead(403).end();
       return;
@@ -153,6 +154,68 @@ function check(name, ok, detail = '') {
 
   const unexpected = pageErrors.filter((e) => !e.includes('nonexistentFunction'));
   check('no unexpected page errors', unexpected.length === 0, unexpected.join(' | ').slice(0, 300));
+
+  // -------------------------------------------------------------------------
+  // Published-page viewer: render the sample project through the generated
+  // self-contained viewer template (as the publish Lambda does) and verify it
+  // runs standalone, then verify the editor round-trip via #open=.
+
+  const viewerTemplate = path.join(__dirname, '..', 'backend', 'src', 'generated', 'viewer.html');
+  if (!fs.existsSync(viewerTemplate)) {
+    console.error('backend/src/generated/viewer.html not found — run `npm run build:viewer` first.');
+    process.exit(2);
+  }
+  const { sampleProject } = await import(
+    require('url').pathToFileURL(path.join(__dirname, '..', 'frontend', 'src', 'editor', 'samples.js')).href
+  );
+  const project = sampleProject();
+  const publishedHtml = fs
+    .readFileSync(viewerTemplate, 'utf-8')
+    .replaceAll('{{TITLE}}', 'Test page')
+    .replace('{{PROJECT_JSON}}', () => JSON.stringify(project).replace(/</g, '\\u003c'));
+  fs.mkdirSync(path.join(ROOT, 'p', 'test-page'), { recursive: true });
+  fs.writeFileSync(path.join(ROOT, 'p', 'test-page', 'index.html'), publishedHtml);
+
+  const viewerPage = await browser.newPage();
+  const viewerErrors = [];
+  viewerPage.on('pageerror', (e) => viewerErrors.push(e.message));
+  const viewerLogs = [];
+  viewerPage.on('console', (m) => viewerLogs.push(m.text()));
+
+  await viewerPage.goto(`${baseUrl}p/test-page/`, { waitUntil: 'networkidle' });
+  await viewerPage.locator('counter-view .value').waitFor({ timeout: 5000 }).catch(() => {});
+  check('published page boots standalone', (await viewerPage.locator('counter-view .value').count()) === 1);
+  check('published page takes its title from the project', (await viewerPage.title()) === 'Counter demo');
+
+  await viewerPage.locator('counter-view button').nth(1).click();
+  await viewerPage.waitForTimeout(200);
+  check(
+    'published page is interactive (counter increments)',
+    (await viewerPage.locator('counter-view .value').innerText()) === '1'
+  );
+  check(
+    'published page handlers fire (console log)',
+    viewerLogs.some((l) => l.includes('count: 0 → 1'))
+  );
+  check('published page has no errors', viewerErrors.length === 0, viewerErrors.join(' | '));
+  await viewerPage.close();
+
+  // Round-trip: #open= loads the embedded project back into the editor.
+  const editorPage = await browser.newPage();
+  await editorPage.goto(`${baseUrl}#open=/p/test-page/`, { waitUntil: 'networkidle' });
+  await editorPage.waitForSelector('.status.running', { timeout: 5000 }).catch(() => {});
+  await editorPage.waitForTimeout(300);
+  check(
+    'editor #open= reopens a published page (5 sidebar items)',
+    (await editorPage.locator('.item').count()) === 5
+  );
+  const reopenedFrame = editorPage.frameLocator('#page-frame');
+  await reopenedFrame.locator('counter-view .value').waitFor({ timeout: 5000 }).catch(() => {});
+  check(
+    'reopened project runs in the editor',
+    await reopenedFrame.locator('counter-view .value').count().then((n) => n === 1).catch(() => false)
+  );
+  await editorPage.close();
 
   await browser.close();
   server.close();

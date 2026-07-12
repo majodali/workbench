@@ -57,9 +57,11 @@ aws iam attach-role-policy --role-name <app>-deploy \
 
 Secrets:
 
-| Secret                | Value                   |
-| --------------------- | ----------------------- |
-| `AWS_DEPLOY_ROLE_ARN` | The role ARN from above |
+| Secret                | Value                                        |
+| --------------------- | -------------------------------------------- |
+| `AWS_DEPLOY_ROLE_ARN` | The role ARN from above                      |
+| `ADMIN_USERNAME`      | First admin login (site-wide auth), seeded on deploy |
+| `ADMIN_PASSWORD`      | A strong password for that admin             |
 
 Variables:
 

@@ -126,7 +126,7 @@ mutating them, so “what triggered this change?” stays answerable.
 
 The repo follows the
 [serverless-web-app-template](https://github.com/majodali/serverless-web-app-template)
-layout (npm workspaces; `backend/` will be added when backend services land):
+layout (npm workspaces):
 
 ```
 frontend/
@@ -136,11 +136,14 @@ frontend/
 │           ▼
 └── public/                     served VERBATIM (never bundled):
     ├── runtime/page.html + runtime.js   the page realm (sandboxed iframe)
+    │   ├── boot.js             shared boot core (also used by the viewer)
     │   ├── evaluate.js         acorn parse → with(scope) compile → invoke
     │   ├── data.js             DataComponent / DataRegistry (+computed)
     │   └── ui.js               defineComponent (custom elements + lit-html)
     └── vendor/                 lit-html and acorn for the page realm
-infra/                          AWS CDK: publishes frontend/dist per hosting mode
+backend/                        Lambdas: site-wide auth (/auth/*) + page publishing
+├── src/viewer/ + scripts/      self-contained viewer template for published pages
+infra/                          AWS CDK: tables, API, hosting, admin seeding
 tests/smoke.js                  end-to-end test in headless Chromium
 .github/workflows/              CI (PR checks) and Deploy (OIDC, on main)
 ```
@@ -156,6 +159,30 @@ postMessage.
 Boot sequence on load/reload: render page HTML into the iframe → build the
 shared scope and inject the runtime API → create declared data components →
 run definition executables in order → attach handlers → report `loaded`.
+
+## Publishing and auth
+
+Signed-in users can **publish** a project from the editor toolbar: the backend
+renders it into a fully self-contained HTML file (runtime + lit-html + acorn +
+the project document inlined — no external dependencies, pages never break
+when the platform changes) and writes it to the site bucket at
+**`/p/<slug>/`**. Anyone can read published pages; only authenticated users
+can publish. A published page embeds its project document as JSON, so the
+editor can reopen any published URL for editing (`#open=/p/<slug>/`, or the
+"edit" button in the publish dialog). Slugs are owned by whoever published
+them first; a DynamoDB table tracks ownership and powers the "my pages" list.
+
+Auth is **site-wide**, not Contraption-specific: admin-created accounts
+(no signup), bcrypt password hashes, 30-day JWTs from app-neutral `/auth/*`
+routes, and the token is stored under an origin-wide localStorage key so
+future apps on the same domain share the session. The first admin is seeded
+at deploy from `ADMIN_USERNAME`/`ADMIN_PASSWORD`.
+
+> **Trust note:** published pages run arbitrary JavaScript on the site's
+> origin — the same origin as everyone's auth token. That's acceptable while
+> accounts are admin-created (publishers are trusted); serving published
+> pages from a separate sandbox origin is the roadmap item to revisit before
+> opening accounts more widely.
 
 ## Project document format
 
@@ -175,10 +202,9 @@ run definition executables in order → attach handlers → report `loaded`.
 
 ## Roadmap
 
-- **Backend services** — a `backend/` workspace following the template's
-  pattern (Lambda + API Gateway + DynamoDB); `infra/` and the deploy pipeline
-  are already shaped for it, and `config.json` is the slot where the API URL
-  will surface.
+- **Sandbox origin for published pages** — serve `/p/*` from a separate
+  domain so page code can't read the site auth token (needed before accounts
+  go beyond trusted users).
 - **Canvas scene graph** — multiple graphic components per canvas with draw
   order, invalidation, and hit-testing so pointer events route to the right
   component. The interface will mirror `defineComponent`.

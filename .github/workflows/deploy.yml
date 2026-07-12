@@ -9,6 +9,7 @@ on:
   push:
     branches: [main]
     paths:
+      - "backend/**"
       - "frontend/**"
       - "infra/**"
       - "package.json"
@@ -37,6 +38,8 @@ jobs:
       SITE_BUCKET_NAME: ${{ vars.SITE_BUCKET_NAME }}
       SITE_PATH_PREFIX: ${{ vars.SITE_PATH_PREFIX }}
       SITE_BASE_URL: ${{ vars.SITE_BASE_URL }}
+      ADMIN_USERNAME: ${{ secrets.ADMIN_USERNAME }}
+      ADMIN_PASSWORD: ${{ secrets.ADMIN_PASSWORD }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -48,6 +51,8 @@ jobs:
         run: npm run typecheck
       - name: Build frontend
         run: npm run build:frontend
+      - name: Build viewer template
+        run: npm run build:viewer --workspace backend
       - name: Configure AWS credentials (OIDC)
         uses: aws-actions/configure-aws-credentials@v4
         with:

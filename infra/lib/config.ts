@@ -21,6 +21,10 @@ export interface AppConfig {
   siteBucketName: string;
   sitePathPrefix: string;
   siteBaseUrl: string;
+
+  // ---- First admin (seeded on deploy) ----
+  adminUsername: string;
+  adminPassword: string;
 }
 
 function sanitize(name: string): string {
@@ -51,5 +55,7 @@ export function loadConfig(): AppConfig {
     siteBucketName,
     sitePathPrefix,
     siteBaseUrl,
+    adminUsername: process.env.ADMIN_USERNAME?.trim() || "admin",
+    adminPassword: process.env.ADMIN_PASSWORD || "",
   };
 }

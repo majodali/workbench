@@ -3,6 +3,7 @@ node_modules/
 
 # builds
 frontend/dist/
+backend/src/generated/
 
 # CDK
 infra/cdk.out/
