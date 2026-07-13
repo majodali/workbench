@@ -156,6 +156,38 @@ function check(name, ok, detail = '') {
   check('no unexpected page errors', unexpected.length === 0, unexpected.join(' | ').slice(0, 300));
 
   // -------------------------------------------------------------------------
+  // Project slots: creating/loading always lands in a fresh slot, switching
+  // preserves each project's work.
+
+  check('slot switcher shows one project', (await page.locator('#slot-select option').count()) === 1);
+
+  await page.locator('.toolbar button', { hasText: 'new' }).click();
+  await page.waitForTimeout(300);
+  check('"new" creates a second slot instead of replacing', (await page.locator('#slot-select option').count()) === 2);
+  check('new project starts empty (page + definitions)', (await page.locator('.item').count()) === 2);
+
+  await page.locator('.item', { hasText: 'definitions' }).click();
+  await page.locator('textarea.code').fill('// marker-in-slot-two\n');
+  await page.waitForTimeout(500); // autosave debounce
+
+  const slotIds = await page.locator('#slot-select option').evaluateAll((os) => os.map((o) => o.value));
+  await page.selectOption('#slot-select', slotIds[0]);
+  await page.waitForTimeout(400);
+  check(
+    'switching back restores the counter project (6 items after added script)',
+    (await page.locator('.item').count()) === 6,
+    String(await page.locator('.item').count())
+  );
+
+  await page.selectOption('#slot-select', slotIds[1]);
+  await page.waitForTimeout(400);
+  await page.locator('.item', { hasText: 'definitions' }).click();
+  check(
+    'edits in the other slot survive switching',
+    (await page.locator('textarea.code').inputValue()).includes('marker-in-slot-two')
+  );
+
+  // -------------------------------------------------------------------------
   // Published-page viewer: render the sample project through the generated
   // self-contained viewer template (as the publish Lambda does) and verify it
   // runs standalone, then verify the editor round-trip via #open=.
@@ -208,6 +240,12 @@ function check(name, ok, detail = '') {
   check(
     'editor #open= reopens a published page (5 sidebar items)',
     (await editorPage.locator('.item').count()) === 5
+  );
+  // editorPage is a fresh browser context (empty localStorage): the initial
+  // slot plus the one #open= creates. The opened project must be selected.
+  check(
+    '#open= lands in a fresh slot instead of replacing',
+    (await editorPage.locator('#slot-select option').count()) === 2
   );
   const reopenedFrame = editorPage.frameLocator('#page-frame');
   await reopenedFrame.locator('counter-view .value').waitFor({ timeout: 5000 }).catch(() => {});

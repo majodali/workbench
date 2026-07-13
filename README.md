@@ -178,6 +178,12 @@ routes, and the token is stored under an origin-wide localStorage key so
 future apps on the same domain share the session. The first admin is seeded
 at deploy from `ADMIN_USERNAME`/`ADMIN_PASSWORD`.
 
+Locally, the editor keeps **named project slots** (localStorage, one key per
+project, switcher in the toolbar). Creating a new project, importing a JSON
+file, and opening a published page all land in a *fresh* slot — existing work
+is never overwritten. The trash button deletes the current slot from the
+browser only; published copies are unaffected.
+
 > **Trust note:** published pages run arbitrary JavaScript on the site's
 > origin — the same origin as everyone's auth token. That's acceptable while
 > accounts are admin-created (publishers are trusted); serving published
@@ -202,10 +208,6 @@ at deploy from `ADMIN_USERNAME`/`ADMIN_PASSWORD`.
 
 ## Roadmap
 
-- **Named local projects / unsaved-changes guard** — the editor currently has
-  one working project in localStorage, and loading a published page replaces
-  it silently. Add named local project slots (with `#open=` loading into a
-  fresh slot) so work can't be clobbered accidentally.
 - **Loadable modules** — author reusable libraries in the editor and publish
   them as real ES modules at `/m/<slug>.js` (same auth/ownership machinery as
   pages). Consumption already works — executables can `import` any URL —

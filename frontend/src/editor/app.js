@@ -12,16 +12,71 @@ import { sampleProject, emptyProject } from './samples.js';
 import { api, ApiError, getToken, setToken, fetchPublishedProject } from './api.js';
 import './editor.css';
 
-// Namespaced by base path: when deployed under a sub-folder of a shared
-// domain, this app must not collide with other apps' localStorage.
-const STORAGE_KEY = `contraption-project:${new URL('.', location.href).pathname}`;
+// Storage keys are namespaced by base path: when deployed under a sub-folder
+// of a shared domain, this app must not collide with other apps' localStorage.
+// Projects live in named slots — an index plus one key per project — so
+// loading a published page or importing never overwrites existing work.
+const BASE_PATH = new URL('.', location.href).pathname;
+const INDEX_KEY = `contraption-projects:${BASE_PATH}`;
+const LEGACY_KEY = `contraption-project:${BASE_PATH}`; // pre-slots single project
+const slotKey = (id) => `contraption-project:${BASE_PATH}:${id}`;
 const PAGE_ITEM = '__page__';
+
+function readSlot(id) {
+  try {
+    const doc = JSON.parse(localStorage.getItem(slotKey(id)));
+    if (doc && Array.isArray(doc.components)) return doc;
+  } catch {
+    /* corrupted slot — treat as missing */
+  }
+  return null;
+}
+
+/** Load the slot index, migrating the legacy single-project key if present. */
+function initProjects() {
+  try {
+    const index = JSON.parse(localStorage.getItem(INDEX_KEY));
+    if (index && Array.isArray(index.slots) && index.slots.length) {
+      const currentId = index.slots.some((s) => s.id === index.currentId)
+        ? index.currentId
+        : index.slots[0].id;
+      const project = readSlot(currentId) ?? sampleProject();
+      return { slots: index.slots, currentId, project };
+    }
+  } catch {
+    /* fall through to fresh index */
+  }
+
+  let project = null;
+  try {
+    const legacy = JSON.parse(localStorage.getItem(LEGACY_KEY));
+    if (legacy && Array.isArray(legacy.components)) project = legacy;
+  } catch {
+    /* no legacy project */
+  }
+  project = project ?? sampleProject();
+
+  const id = crypto.randomUUID();
+  const slots = [{ id, name: project.name || 'Untitled project', updatedAt: Date.now() }];
+  try {
+    localStorage.setItem(slotKey(id), JSON.stringify(project));
+    localStorage.setItem(INDEX_KEY, JSON.stringify({ currentId: id, slots }));
+    localStorage.removeItem(LEGACY_KEY);
+  } catch {
+    /* storage unavailable — the editor still works, just without persistence */
+  }
+  return { slots, currentId: id, project };
+}
+
+const initialProjects = initProjects();
 
 // ---------------------------------------------------------------------------
 // State
 
 const state = {
-  project: loadProject(),
+  project: initialProjects.project,
+  slots: initialProjects.slots,
+  currentSlotId: initialProjects.currentId,
   selectedId: PAGE_ITEM,
   console: [],
   dataValues: {},
@@ -40,29 +95,36 @@ const state = {
   login: { username: '', password: '', busy: false, error: null },
 };
 
-function loadProject() {
+function saveIndex() {
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (raw) {
-      const doc = JSON.parse(raw);
-      if (doc && Array.isArray(doc.components)) return doc;
-    }
-  } catch {
-    /* fall through to sample */
+    localStorage.setItem(
+      INDEX_KEY,
+      JSON.stringify({ currentId: state.currentSlotId, slots: state.slots })
+    );
+  } catch (err) {
+    console.warn('saving project index failed', err);
   }
-  return sampleProject();
 }
 
 let saveTimer = null;
 function persist() {
   clearTimeout(saveTimer);
-  saveTimer = setTimeout(() => {
-    try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(state.project));
-    } catch (err) {
-      console.warn('autosave failed', err);
+  saveTimer = setTimeout(flushAutosave, 300);
+}
+
+function flushAutosave() {
+  clearTimeout(saveTimer);
+  try {
+    const slot = state.slots.find((s) => s.id === state.currentSlotId);
+    if (slot) {
+      slot.name = state.project.name || 'Untitled project';
+      slot.updatedAt = Date.now();
     }
-  }, 300);
+    localStorage.setItem(slotKey(state.currentSlotId), JSON.stringify(state.project));
+    saveIndex();
+  } catch (err) {
+    console.warn('autosave failed', err);
+  }
 }
 
 function mutate(fn, { needsReload = false } = {}) {
@@ -210,22 +272,62 @@ function importProject(file) {
       alert('Not a project file (missing components array).');
       return;
     }
-    mutate(() => {
-      state.project = doc;
-      state.selectedId = PAGE_ITEM;
-      state.console = [];
-    });
-    reloadPage();
+    createSlot(doc);
   });
 }
 
-function replaceProject(doc) {
-  mutate(() => {
-    state.project = doc;
-    state.selectedId = PAGE_ITEM;
-    state.console = [];
-  });
+// ---------------------------------------------------------------------------
+// Project slots — loading anything always lands in a fresh slot; existing
+// work is never overwritten.
+
+function activateProject(id, doc) {
+  state.currentSlotId = id;
+  state.project = doc;
+  state.selectedId = PAGE_ITEM;
+  state.console = [];
+  saveIndex();
+  update();
   reloadPage();
+}
+
+function createSlot(doc) {
+  flushAutosave();
+  const id = crypto.randomUUID();
+  state.slots.push({ id, name: doc.name || 'Untitled project', updatedAt: Date.now() });
+  try {
+    localStorage.setItem(slotKey(id), JSON.stringify(doc));
+  } catch (err) {
+    console.warn('saving new project failed', err);
+  }
+  activateProject(id, doc);
+}
+
+function switchSlot(id) {
+  if (id === state.currentSlotId) return;
+  const doc = readSlot(id);
+  if (!doc) return;
+  flushAutosave();
+  activateProject(id, doc);
+}
+
+function deleteCurrentSlot() {
+  const slot = state.slots.find((s) => s.id === state.currentSlotId);
+  if (
+    !confirm(
+      `Delete project "${slot?.name ?? 'Untitled'}" from this browser? Published copies are unaffected.`
+    )
+  ) {
+    return;
+  }
+  clearTimeout(saveTimer); // don't resurrect the key via a pending autosave
+  localStorage.removeItem(slotKey(state.currentSlotId));
+  state.slots = state.slots.filter((s) => s.id !== state.currentSlotId);
+  if (!state.slots.length) {
+    createSlot(emptyProject());
+    return;
+  }
+  const next = state.slots[0];
+  activateProject(next.id, readSlot(next.id) ?? emptyProject());
 }
 
 // ---------------------------------------------------------------------------
@@ -325,7 +427,7 @@ async function deletePublished(page) {
 async function openPublishedInEditor(path) {
   try {
     const project = await fetchPublishedProject(path);
-    replaceProject(project);
+    createSlot(project);
     state.publish.open = false;
     update();
   } catch (err) {
@@ -684,11 +786,25 @@ function toolbarView() {
   return html`
     <header class="toolbar">
       <span class="logo">⚙ contraption</span>
+      <select
+        id="slot-select"
+        class="slot-select"
+        title="Switch project"
+        @change=${(e) => switchSlot(e.target.value)}
+      >
+        ${state.slots.map(
+          (s) => html`<option value=${s.id} ?selected=${s.id === state.currentSlotId}>${s.name}</option>`
+        )}
+      </select>
       <input
         class="project-name"
+        title="Rename this project"
         .value=${live(state.project.name ?? '')}
         @input=${(e) => mutate(() => (state.project.name = e.target.value))}
       />
+      <button class="danger" title="Delete this project from the browser" @click=${deleteCurrentSlot}>
+        🗑
+      </button>
       <button class=${classMap({ primary: state.stale })} @click=${reloadPage}>
         ⟳ reload page${state.stale ? ' (stale)' : ''}
       </button>
@@ -710,12 +826,10 @@ function toolbarView() {
           }}
         />
       </label>
-      <button @click=${() => confirm('Replace the current project with the sample?') && replaceProject(sampleProject())}>
+      <button title="Create a new project from the sample" @click=${() => createSlot(sampleProject())}>
         sample
       </button>
-      <button @click=${() => confirm('Replace the current project with a new empty one?') && replaceProject(emptyProject())}>
-        new
-      </button>
+      <button title="Create a new empty project" @click=${() => createSlot(emptyProject())}>new</button>
     </header>
   `;
 }
@@ -738,6 +852,12 @@ function update() {
   render(appView(), document.getElementById('app'));
   const scroll = document.getElementById('console-scroll');
   if (scroll) scroll.scrollTop = scroll.scrollHeight;
+  // <option selected> only sets the default; set the live selection explicitly
+  // so re-renders can't leave the switcher on a stale entry.
+  const slotSelect = /** @type {HTMLSelectElement | null} */ (
+    document.getElementById('slot-select')
+  );
+  if (slotSelect) slotSelect.value = state.currentSlotId;
 }
 
 update();
