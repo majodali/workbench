@@ -202,6 +202,20 @@ at deploy from `ADMIN_USERNAME`/`ADMIN_PASSWORD`.
 
 ## Roadmap
 
+- **Named local projects / unsaved-changes guard** — the editor currently has
+  one working project in localStorage, and loading a published page replaces
+  it silently. Add named local project slots (with `#open=` loading into a
+  fresh slot) so work can't be clobbered accidentally.
+- **Loadable modules** — author reusable libraries in the editor and publish
+  them as real ES modules at `/m/<slug>.js` (same auth/ownership machinery as
+  pages). Consumption already works — executables can `import` any URL —
+  so the work is authoring, publishing, and versioning policy.
+- **TypeScript executables** — phase 1: per-executable `lang: "ts"` with
+  Sucrase type-stripping in front of the existing acorn transform; published
+  pages transpile at publish time so the viewer stays TS-free. Phase 2:
+  Monaco editor + TS language service for diagnostics/completions, with
+  synthesized ambient declarations for the runtime API and the shared
+  namespace.
 - **Sandbox origin for published pages** — serve `/p/*` from a separate
   domain so page code can't read the site auth token (needed before accounts
   go beyond trusted users).
