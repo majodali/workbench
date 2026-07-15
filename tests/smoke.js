@@ -30,9 +30,86 @@ const MIME = {
   '.svg': 'image/svg+xml',
 };
 
+const VIEWER_TEMPLATE = path.join(__dirname, '..', 'backend', 'src', 'generated', 'viewer.html');
+
+/**
+ * Static server + a mock of the site API speaking the same wire protocol as
+ * the Lambdas (auth + pages), writing published pages through the real viewer
+ * template. This lets the full publish UI flow run in CI without AWS.
+ */
+const MOCK_TOKEN = 'test-token-123';
+const MOCK_USER = { userId: 'u1', username: 'tester', displayName: 'Tester', role: 'admin', createdAt: 0 };
+const SLUG_RE = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])$/;
+
+function handleMockApi(req, res, urlPath) {
+  let body = '';
+  req.on('data', (c) => (body += c));
+  req.on('end', () => {
+    const send = (code, obj) =>
+      res.writeHead(code, { 'content-type': 'application/json' }).end(JSON.stringify(obj));
+    const authed = req.headers.authorization === `Bearer ${MOCK_TOKEN}`;
+    const route = `${req.method} ${urlPath}`;
+    const db = handleMockApi.pages; // slug -> page record
+
+    if (route === 'POST /api/auth/login') {
+      const { username, password } = JSON.parse(body || '{}');
+      if (username === 'tester' && password === 'pw123') return send(200, { token: MOCK_TOKEN, user: MOCK_USER });
+      return send(401, { error: 'Invalid username or password' });
+    }
+    if (route === 'GET /api/auth/me') {
+      return authed ? send(200, { user: MOCK_USER }) : send(401, { error: 'Unauthorized' });
+    }
+    if (route === 'POST /api/pages') {
+      if (!authed) return send(401, { error: 'Unauthorized' });
+      const { slug, title, project } = JSON.parse(body || '{}');
+      if (!SLUG_RE.test(slug ?? '')) {
+        return send(400, { error: 'slug must be 2-63 lowercase letters, digits or hyphens' });
+      }
+      const html = fs
+        .readFileSync(VIEWER_TEMPLATE, 'utf-8')
+        .replaceAll('{{TITLE}}', title || slug)
+        .replace('{{PROJECT_JSON}}', () => JSON.stringify(project).replace(/</g, '\\u003c'));
+      fs.mkdirSync(path.join(ROOT, 'p', slug), { recursive: true });
+      fs.writeFileSync(path.join(ROOT, 'p', slug, 'index.html'), html);
+      const now = Date.now();
+      const record = db.get(slug) ?? { slug, createdAt: now };
+      Object.assign(record, {
+        title: title || slug,
+        updatedAt: now,
+        ownerUsername: MOCK_USER.username,
+        path: `/p/${slug}/`,
+      });
+      db.set(slug, record);
+      return send(200, { page: record });
+    }
+    if (route === 'GET /api/pages') {
+      return authed ? send(200, { pages: [...db.values()] }) : send(401, { error: 'Unauthorized' });
+    }
+    if (req.method === 'DELETE' && urlPath.startsWith('/api/pages/')) {
+      if (!authed) return send(401, { error: 'Unauthorized' });
+      const slug = decodeURIComponent(urlPath.slice('/api/pages/'.length));
+      db.delete(slug);
+      fs.rmSync(path.join(ROOT, 'p', slug), { recursive: true, force: true });
+      return send(200, { ok: true });
+    }
+    return send(404, { error: 'not found' });
+  });
+}
+handleMockApi.pages = new Map();
+
 function startServer() {
   const server = http.createServer((req, res) => {
     let urlPath = decodeURIComponent(new URL(req.url, 'http://x').pathname);
+    if (urlPath === '/config.json') {
+      res
+        .writeHead(200, { 'content-type': 'application/json' })
+        .end(JSON.stringify({ apiUrl: '/api', appName: 'contraption', pagesPrefix: 'p' }));
+      return;
+    }
+    if (urlPath.startsWith('/api/')) {
+      handleMockApi(req, res, urlPath);
+      return;
+    }
     if (urlPath.endsWith('/')) urlPath += 'index.html';
     let file = path.join(ROOT, urlPath);
     if (!file.startsWith(ROOT)) {
@@ -74,6 +151,7 @@ function check(name, ok, detail = '') {
   const baseUrl = `http://127.0.0.1:${server.address().port}/`;
   const browser = await chromium.launch({ executablePath: findChromium(), args: ['--no-sandbox'] });
   const page = await browser.newPage();
+  page.on('dialog', (d) => d.accept()); // auto-confirm delete dialogs
   const pageErrors = [];
   page.on('pageerror', (e) => pageErrors.push('editor: ' + e.message));
   page.on('console', (m) => {
@@ -188,6 +266,119 @@ function check(name, ok, detail = '') {
   );
 
   // -------------------------------------------------------------------------
+  // Publish flow against the mock API: login (including failure), slug
+  // validation, publish, serving, the my-pages list, edit round-trip,
+  // session restore, and delete.
+
+  await page.locator('.toolbar button', { hasText: 'publish' }).click();
+  check('publish modal opens with a login form', (await page.locator('.modal input[type="password"]').count()) === 1);
+
+  await page.locator('.modal-input').first().fill('tester');
+  await page.locator('.modal input[type="password"]').fill('wrong-password');
+  await page.locator('.modal button', { hasText: 'sign in' }).click();
+  await page.waitForTimeout(400);
+  check('bad credentials show an error', (await page.locator('.modal-error').innerText()).includes('Invalid'));
+
+  await page.locator('.modal input[type="password"]').fill('pw123');
+  await page.locator('.modal button', { hasText: 'sign in' }).click();
+  await page.waitForTimeout(400);
+  check('login switches to the publish form', (await page.locator('.modal').innerText()).includes('Signed in as Tester'));
+
+  await page.locator('.modal-input').first().fill('BAD SLUG!');
+  await page.locator('.modal button', { hasText: 'publish' }).click();
+  await page.waitForTimeout(400);
+  check('invalid slug error from the API surfaces in the dialog', (await page.locator('.modal-error').count()) === 1);
+
+  await page.locator('.modal-input').first().fill('e2e-page');
+  await page.locator('.modal button', { hasText: 'publish' }).click();
+  await page.waitForTimeout(500);
+  check('publish succeeds and shows the URL', (await page.locator('.modal-success').innerText()).includes('/p/e2e-page/'));
+  check('my-pages list shows the published page', (await page.locator('.pages-table').innerText()).includes('/p/e2e-page/'));
+
+  const publishedTab = await browser.newPage();
+  await publishedTab.goto(`${baseUrl}p/e2e-page/`, { waitUntil: 'networkidle' });
+  check(
+    'mock-published page serves and renders its page HTML',
+    (await publishedTab.locator('body').innerText()).includes('New page')
+  );
+  await publishedTab.close();
+
+  const slotsBeforeEdit = await page.locator('#slot-select option').count();
+  await page.locator('.pages-table button', { hasText: 'edit' }).click();
+  await page.waitForTimeout(500);
+  check(
+    'edit from my-pages loads into a fresh slot and closes the modal',
+    (await page.locator('#slot-select option').count()) === slotsBeforeEdit + 1 &&
+      (await page.locator('.modal').count()) === 0
+  );
+
+  await page.reload({ waitUntil: 'networkidle' });
+  await page.waitForSelector('.status.running', { timeout: 5000 });
+  await page.locator('.toolbar button', { hasText: 'publish' }).click();
+  await page.waitForTimeout(400);
+  check(
+    'auth session survives a page reload',
+    (await page.locator('.modal').innerText()).includes('Signed in as Tester')
+  );
+
+  await page.locator('.pages-table button', { hasText: 'delete' }).click();
+  await page.waitForTimeout(400);
+  check(
+    'deleting a published page removes it from the list',
+    !(await page.locator('.modal').innerText()).includes('/p/e2e-page/')
+  );
+  await page.locator('.modal-header button', { hasText: '✕' }).click();
+
+  // -------------------------------------------------------------------------
+  // Export / import round trip.
+
+  const [download] = await Promise.all([
+    page.waitForEvent('download'),
+    page.locator('.toolbar button', { hasText: 'export' }).click(),
+  ]);
+  const exportPath = path.join(require('os').tmpdir(), 'contraption-export.json');
+  await download.saveAs(exportPath);
+  const exported = JSON.parse(fs.readFileSync(exportPath, 'utf-8'));
+  check('export produces the current project document', Array.isArray(exported.components));
+
+  const slotsBeforeImport = await page.locator('#slot-select option').count();
+  await page.locator('.toolbar input[type="file"]').setInputFiles(exportPath);
+  await page.waitForTimeout(500);
+  check(
+    'import lands in a fresh slot',
+    (await page.locator('#slot-select option').count()) === slotsBeforeImport + 1
+  );
+
+  // -------------------------------------------------------------------------
+  // Page HTML editing, the stale indicator, component + slot deletion.
+
+  await page.locator('.item', { hasText: 'Page HTML' }).click();
+  await page.locator('textarea.code').fill('<h1>Edited page</h1>');
+  await page.waitForTimeout(200);
+  check(
+    'definition-affecting edits mark the page stale',
+    (await page.locator('.toolbar button', { hasText: 'reload page' }).innerText()).includes('stale')
+  );
+  await page.locator('.toolbar button', { hasText: 'reload page' }).click();
+  await page.waitForSelector('.status.running', { timeout: 5000 });
+  await page.waitForTimeout(200);
+  check('reload applies page HTML edits', (await frame.locator('h1').innerText()) === 'Edited page');
+
+  const itemsBeforeDelete = await page.locator('.item').count();
+  await page.locator('.item', { hasText: 'definitions' }).click();
+  await page.locator('.editor-header button', { hasText: 'delete' }).click();
+  await page.waitForTimeout(300);
+  check('deleting a component removes it', (await page.locator('.item').count()) === itemsBeforeDelete - 1);
+
+  const slotsBeforeSlotDelete = await page.locator('#slot-select option').count();
+  await page.locator('.toolbar button[title="Delete this project from the browser"]').click();
+  await page.waitForTimeout(400);
+  check(
+    'deleting a project slot removes it',
+    (await page.locator('#slot-select option').count()) === slotsBeforeSlotDelete - 1
+  );
+
+  // -------------------------------------------------------------------------
   // Published-page viewer: render the sample project through the generated
   // self-contained viewer template (as the publish Lambda does) and verify it
   // runs standalone, then verify the editor round-trip via #open=.
@@ -201,6 +392,15 @@ function check(name, ok, detail = '') {
     require('url').pathToFileURL(path.join(__dirname, '..', 'frontend', 'src', 'editor', 'samples.js')).href
   );
   const project = sampleProject();
+  // Escaping regression: code containing a literal </script> must not break
+  // out of the embedded JSON block.
+  project.components.push({
+    id: 'nasty',
+    type: 'executable',
+    mode: 'definition',
+    name: 'nasty strings',
+    code: 'const nasty = "</script>"; console.log("escape-ok", nasty.length);',
+  });
   const publishedHtml = fs
     .readFileSync(viewerTemplate, 'utf-8')
     .replaceAll('{{TITLE}}', 'Test page')
@@ -229,6 +429,10 @@ function check(name, ok, detail = '') {
     'published page handlers fire (console log)',
     viewerLogs.some((l) => l.includes('count: 0 → 1'))
   );
+  check(
+    'embedded </script> in code is escaped safely',
+    viewerLogs.some((l) => l.includes('escape-ok 9'))
+  );
   check('published page has no errors', viewerErrors.length === 0, viewerErrors.join(' | '));
   await viewerPage.close();
 
@@ -238,8 +442,8 @@ function check(name, ok, detail = '') {
   await editorPage.waitForSelector('.status.running', { timeout: 5000 }).catch(() => {});
   await editorPage.waitForTimeout(300);
   check(
-    'editor #open= reopens a published page (5 sidebar items)',
-    (await editorPage.locator('.item').count()) === 5
+    'editor #open= reopens a published page (6 sidebar items)',
+    (await editorPage.locator('.item').count()) === 6
   );
   // editorPage is a fresh browser context (empty localStorage): the initial
   // slot plus the one #open= creates. The opened project must be selected.

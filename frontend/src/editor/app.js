@@ -677,13 +677,23 @@ function loginFormView() {
   return html`
     <p class="hint">Sign in to publish. Accounts are created by the site admin.</p>
     <label class="field-label">username</label>
-    <input class="modal-input" .value=${live(l.username)} @input=${(e) => (l.username = e.target.value)} />
+    <input
+      class="modal-input"
+      .value=${live(l.username)}
+      @input=${(e) => {
+        l.username = e.target.value;
+        update();
+      }}
+    />
     <label class="field-label">password</label>
     <input
       class="modal-input"
       type="password"
       .value=${live(l.password)}
-      @input=${(e) => (l.password = e.target.value)}
+      @input=${(e) => {
+        l.password = e.target.value;
+        update();
+      }}
       @keydown=${(e) => e.key === 'Enter' && doLogin()}
     />
     ${l.error ? html`<p class="modal-error">${l.error}</p>` : nothing}
