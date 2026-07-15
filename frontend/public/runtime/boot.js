@@ -82,7 +82,7 @@ export function createPageRuntime({
 
   async function runExecutable(component, event) {
     const name = component.name || component.id;
-    const compiled = compile(component.code ?? '', { name });
+    const compiled = await compile(component.code ?? '', { name, lang: component.lang });
     return withOrigin(name, () => compiled.invoke(scopeCtx, event));
   }
 
@@ -125,7 +125,7 @@ export function createPageRuntime({
         }
         let compiled;
         try {
-          compiled = compile(c.code ?? '', { name: handlerName });
+          compiled = await compile(c.code ?? '', { name: handlerName, lang: c.lang });
         } catch (err) {
           reportError(err, handlerName);
           continue;

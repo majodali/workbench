@@ -161,7 +161,10 @@ function reloadPage() {
 
 function runComponent(c) {
   if (state.pageStatus !== 'running') return;
-  postToRuntime({ type: 'run-executable', component: { id: c.id, name: c.name, code: c.code } });
+  postToRuntime({
+    type: 'run-executable',
+    component: { id: c.id, name: c.name, code: c.code, lang: c.lang },
+  });
 }
 
 window.addEventListener('message', (e) => {
@@ -589,6 +592,16 @@ function executableEditorView(c) {
           <option value="definition">${MODE_LABELS.definition}</option>
           <option value="script">${MODE_LABELS.script}</option>
           <option value="handler">${MODE_LABELS.handler}</option>
+        </select>
+        <select
+          class="lang-select"
+          title="Language (TypeScript is type-stripped, not typechecked)"
+          .value=${live(c.lang ?? 'js')}
+          @change=${(e) =>
+            mutate(() => (c.lang = e.target.value), { needsReload: c.mode !== 'script' })}
+        >
+          <option value="js">JS</option>
+          <option value="ts">TS</option>
         </select>
         ${c.mode === 'handler'
           ? html`<input

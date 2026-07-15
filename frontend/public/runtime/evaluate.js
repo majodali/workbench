@@ -92,12 +92,31 @@ function rewriteImport(node, names) {
   return parts.join(' ');
 }
 
+// Sucrase (vendored) strips TypeScript types ahead of the acorn transform.
+// Loaded lazily so pure-JS projects never pay for it (~200 KB).
+let sucrasePromise = null;
+async function stripTypes(code) {
+  sucrasePromise ??= import('../vendor/sucrase.mjs');
+  const { transform } = await sucrasePromise;
+  return transform(code, { transforms: ['typescript'], disableESTransforms: true }).code;
+}
+
 /**
  * Compile executable source into an invokable form.
+ * `lang: "ts"` strips types (Sucrase, no typechecking) before compilation.
  * Returns { names, invoke(scopeCtx, event) } where `names` are the top-level
  * bindings the executable contributes to the shared scope.
  */
-export function compile(code, { name = 'executable' } = {}) {
+export async function compile(code, { name = 'executable', lang = 'js' } = {}) {
+  if (lang === 'ts') {
+    try {
+      code = await stripTypes(code);
+    } catch (err) {
+      const e = new SyntaxError(`${name}: ${err.message}`);
+      e.cause = err;
+      throw e;
+    }
+  }
   let ast;
   try {
     ast = acorn.parse(code, {

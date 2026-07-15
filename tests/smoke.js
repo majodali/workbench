@@ -65,6 +65,19 @@ function handleMockApi(req, res, urlPath) {
       if (!SLUG_RE.test(slug ?? '')) {
         return send(400, { error: 'slug must be 2-63 lowercase letters, digits or hyphens' });
       }
+      // Mirror the Lambda: transpile TS executables, embed JS + keep tsCode.
+      const { transform } = require('sucrase');
+      try {
+        project.components = (project.components ?? []).map((c) => {
+          if (c?.type === 'executable' && c.lang === 'ts' && typeof c.code === 'string') {
+            const js = transform(c.code, { transforms: ['typescript'], disableESTransforms: true }).code;
+            return { ...c, code: js, tsCode: c.code };
+          }
+          return c;
+        });
+      } catch (err) {
+        return send(400, { error: `TypeScript error: ${err.message}` });
+      }
       const html = fs
         .readFileSync(VIEWER_TEMPLATE, 'utf-8')
         .replaceAll('{{TITLE}}', title || slug)
@@ -376,6 +389,117 @@ function check(name, ok, detail = '') {
   check(
     'deleting a project slot removes it',
     (await page.locator('#slot-select option').count()) === slotsBeforeSlotDelete - 1
+  );
+
+  // -------------------------------------------------------------------------
+  // TypeScript executables (phase 1: type-stripping): TS definitions share
+  // their namespace with JS, TS scripts run and echo, TS errors surface,
+  // publishing embeds JS, and the round-trip restores TS source.
+
+  await page.locator('.toolbar button', { hasText: 'new' }).click();
+  await page.waitForTimeout(300);
+  await page.locator('.project-name').fill('TS project');
+  await page.locator('.item', { hasText: 'definitions' }).click();
+  await page.locator('.lang-select').selectOption('ts');
+  await page.locator('textarea.code').fill(
+    [
+      'interface Point { x: number; y: number }',
+      'const origin: Point = { x: 0, y: 0 };',
+      'const dist = (p: Point): number => Math.hypot(p.x - origin.x, p.y - origin.y);',
+      "console.log('ts-def-ok', dist({ x: 3, y: 4 }));",
+    ].join('\n')
+  );
+  await page.waitForTimeout(200);
+  await page.locator('.toolbar button', { hasText: 'reload page' }).click();
+  await page.waitForSelector('.status.running', { timeout: 5000 });
+  await page.waitForTimeout(300);
+  check(
+    'TS definition executable runs (types stripped)',
+    (await page.locator('.console-scroll').innerText()).includes('ts-def-ok 5')
+  );
+
+  await page.locator('.sidebar-actions button', { hasText: '+ script' }).click();
+  await page.locator('textarea.code').fill("console.log('js-sees-ts', typeof dist); dist({ x: 6, y: 8 })");
+  await page.locator('button', { hasText: '▶ run' }).click();
+  await page.waitForTimeout(300);
+  const tsOut = await page.locator('.console-scroll').innerText();
+  check('JS executable sees TS definitions in the shared namespace', tsOut.includes('js-sees-ts function'));
+  check('TS-defined function result echoed', tsOut.includes('10'));
+
+  await page.locator('.lang-select').selectOption('ts');
+  await page.locator('textarea.code').fill('const n: number = 21;\nn * 2');
+  await page.locator('button', { hasText: '▶ run' }).click();
+  await page.waitForTimeout(300);
+  check(
+    'TS script runs with annotations and echoes',
+    (await page.locator('.console-scroll').innerText()).includes('42')
+  );
+
+  await page.locator('textarea.code').fill('const broken: = 5;');
+  await page.locator('button', { hasText: '▶ run' }).click();
+  await page.waitForTimeout(300);
+  check(
+    'TS syntax error surfaces in the console',
+    (await page.locator('.console-line.level-error').last().innerText()).length > 0
+  );
+
+  // Publishing with the broken TS script still in the project must fail with
+  // a TS error from the API, surfaced in the dialog.
+  await page.locator('.toolbar button', { hasText: 'publish' }).click();
+  await page.locator('.modal-input').first().fill('ts-page');
+  await page.locator('.modal button', { hasText: 'publish' }).click();
+  await page.waitForTimeout(500);
+  check(
+    'publish-time TS error surfaces in the dialog',
+    (await page.locator('.modal-error').innerText().catch(() => '')).includes('TypeScript error')
+  );
+  await page.locator('.modal-header button', { hasText: '✕' }).click();
+
+  // Fix the script and publish for real.
+  await page.locator('textarea.code').fill("const ok: string = 'fixed';");
+  await page.waitForTimeout(300);
+  await page.locator('.toolbar button', { hasText: 'publish' }).click();
+  await page.locator('.modal-input').first().fill('ts-page');
+  await page.locator('.modal button', { hasText: 'publish' }).click();
+  await page.waitForTimeout(500);
+  check(
+    'TS project publishes once fixed',
+    (await page.locator('.modal-success').innerText().catch(() => '')).includes('/p/ts-page/')
+  );
+
+  const tsPublished = fs.readFileSync(path.join(ROOT, 'p', 'ts-page', 'index.html'), 'utf-8');
+  const tsEmbedded = JSON.parse(
+    tsPublished.match(/<script type="application\/json" id="contraption-project">([\s\S]*?)<\/script>/)[1]
+  );
+  const tsDef = tsEmbedded.components.find((c) => c.name === 'definitions');
+  check(
+    'published artifact embeds transpiled JS',
+    !tsDef.code.includes('interface Point') && tsDef.code.includes('dist')
+  );
+  check('published artifact keeps TS source for round-trip', (tsDef.tsCode ?? '').includes('interface Point'));
+
+  const tsViewerPage = await browser.newPage();
+  const tsViewerLogs = [];
+  tsViewerPage.on('console', (m) => tsViewerLogs.push(m.text()));
+  const tsViewerErrors = [];
+  tsViewerPage.on('pageerror', (e) => tsViewerErrors.push(e.message));
+  await tsViewerPage.goto(`${baseUrl}p/ts-page/`, { waitUntil: 'networkidle' });
+  await tsViewerPage.waitForTimeout(400);
+  check('published TS page boots (viewer stays TS-free)', tsViewerLogs.some((l) => l.includes('ts-def-ok 5')));
+  check('published TS page has no errors', tsViewerErrors.length === 0, tsViewerErrors.join(' | '));
+  await tsViewerPage.close();
+
+  // Round-trip: edit-from-list restores the TS source.
+  await page.locator('.pages-table button', { hasText: 'edit' }).click();
+  await page.waitForTimeout(500);
+  await page.locator('.item', { hasText: 'definitions' }).click();
+  check(
+    'round-trip restores TS source in the editor',
+    (await page.locator('textarea.code').inputValue()).includes('interface Point')
+  );
+  check(
+    'round-trip keeps lang=ts on the executable',
+    (await page.locator('.lang-select').inputValue()) === 'ts'
   );
 
   // -------------------------------------------------------------------------
