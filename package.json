@@ -1,13 +1,26 @@
 {
-  "name": "notebook-workbench",
+  "name": "contraption",
   "version": "0.1.0",
   "private": true,
   "description": "Interactive page-based development environment: executables with a shared namespace, observable data components, and lit-html UI components.",
+  "workspaces": [
+    "backend",
+    "frontend",
+    "infra"
+  ],
   "scripts": {
-    "start": "python3 -m http.server 8000",
-    "test": "node tests/smoke.js"
+    "dev": "npm run dev --workspace frontend",
+    "typecheck": "npm run typecheck --workspace backend && npm run typecheck --workspace frontend && npm run typecheck --workspace infra",
+    "build:frontend": "npm run build --workspace frontend",
+    "build:viewer": "npm run build:viewer --workspace backend",
+    "synth": "npm run build:viewer && npm run synth --workspace infra",
+    "deploy": "npm run build:frontend && npm run build:viewer && npm run deploy --workspace infra",
+    "test": "npm run build:frontend && npm run build:viewer && node tests/smoke.js"
   },
   "devDependencies": {
     "playwright-core": "^1.61.1"
+  },
+  "engines": {
+    "node": ">=20"
   }
 }

@@ -424,3 +424,108 @@ textarea.code.invalid {
   content: '← ';
   color: var(--text-dim);
 }
+
+/* ---- publish modal ---- */
+
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: #000a;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding-top: 10vh;
+  z-index: 10;
+}
+
+.modal {
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 16px;
+  width: min(520px, 92vw);
+  max-height: 75vh;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.modal-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.modal-input {
+  background: var(--bg-inset);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 6px 10px;
+  width: 100%;
+}
+
+.modal-input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.modal-error {
+  color: var(--danger);
+  font-size: 13px;
+  margin: 4px 0 0;
+}
+
+.modal-success {
+  color: var(--ok);
+  font-size: 13px;
+  margin: 4px 0 0;
+  word-break: break-all;
+}
+
+.modal-success a,
+.pages-table a {
+  color: var(--accent);
+}
+
+.modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.pages-table {
+  border-collapse: collapse;
+  width: 100%;
+  font-size: 13px;
+}
+
+.pages-table td {
+  padding: 4px 6px;
+  border-bottom: 1px solid var(--border);
+  vertical-align: middle;
+}
+
+.pages-title {
+  color: var(--text-dim);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 180px;
+}
+
+.pages-actions {
+  text-align: right;
+  white-space: nowrap;
+}
+
+/* ---- project slots ---- */
+
+.slot-select {
+  background: var(--bg-inset);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 4px 6px;
+  max-width: 180px;
+}

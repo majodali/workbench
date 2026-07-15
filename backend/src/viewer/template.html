@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="generator" content="contraption" />
+    <title>{{TITLE}}</title>
+    <link rel="icon" href="data:," />
+    <style>
+      :root {
+        color-scheme: light dark;
+      }
+      body {
+        margin: 0;
+        padding: 16px;
+        font-family: system-ui, sans-serif;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="page-root"></div>
+    <script type="application/json" id="contraption-project">{{PROJECT_JSON}}</script>
+    <script type="module">
+{{VIEWER_JS}}
+    </script>
+  </body>
+</html>

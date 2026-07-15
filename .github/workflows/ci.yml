@@ -1,0 +1,40 @@
+name: CI
+
+# Verifies every pull request into main before it can be merged.
+# No AWS credentials, no deploy — typecheck, build, CDK synth, and the
+# browser smoke test against the built app.
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+      - run: npm ci
+      - name: Typecheck (backend, frontend, infra)
+        run: npm run typecheck
+      - name: Build frontend
+        run: npm run build:frontend
+      - name: Build viewer template
+        run: npm run build:viewer
+      - name: CDK synth (bundles all Lambdas)
+        working-directory: infra
+        run: npx cdk synth --quiet
+      - name: Browser smoke test (built app)
+        env:
+          CHROME_PATH: /usr/bin/google-chrome
+        run: node tests/smoke.js

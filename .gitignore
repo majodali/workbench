@@ -1,2 +1,13 @@
 node_modules/
 *.log
+
+# builds
+frontend/dist/
+backend/src/generated/
+
+# CDK
+infra/cdk.out/
+infra/cdk-outputs.json
+
+# local deployment config (use infra/.env.example as the template)
+infra/.env

@@ -1,6 +1,7 @@
-# Notebook — an interactive page-based development environment
+# Contraption — an interactive page-based development environment
 
-A browser-based environment, in the spirit of coding notebooks, where each
+Build pages like machines: wire parts together and watch them run. Contraption
+is a browser-based environment, in the spirit of coding notebooks, where each
 project is built around a **page**. The page is assembled from components you
 can view, edit, and run live:
 
@@ -24,22 +25,30 @@ shell around the page runtime.
 
 ## Quick start
 
-No build step. Serve the repo root with any static server:
-
-```sh
-npm start        # python3 -m http.server 8000
-```
-
-Open <http://localhost:8000>. The editor loads a sample counter project that
-exercises every component kind: click the counter buttons, run the
-“reset count” script, edit the definitions and press **⟳ reload page**.
-
-Run the end-to-end test (headless Chromium via playwright-core):
-
 ```sh
 npm install
-npm test
+npm run dev        # Vite dev server for the editor
 ```
+
+The editor loads a sample counter project that exercises every component kind:
+click the counter buttons, run the “reset count” script, edit the definitions
+and press **⟳ reload page**.
+
+Other commands (the scripts contract follows
+[majodali/serverless-web-app-template](https://github.com/majodali/serverless-web-app-template)):
+
+```sh
+npm run typecheck        # tsc over frontend (checkJs) and infra
+npm run build:frontend   # production build to frontend/dist
+npm test                 # build + end-to-end smoke test in headless Chromium
+npm run synth            # synthesize the CloudFormation (no AWS needed)
+npm run deploy           # build + cdk deploy (see DEPLOY.md)
+```
+
+To deploy, see **[DEPLOY.md](./DEPLOY.md)** (local) or
+**[docs/CI_DEPLOY.md](./docs/CI_DEPLOY.md)** (GitHub Actions + OIDC —
+including `existing-bucket` mode for deploying into a sub-folder of an
+existing site).
 
 ## Design decisions
 
@@ -115,22 +124,71 @@ mutating them, so “what triggered this change?” stays answerable.
 
 ## Architecture
 
+The repo follows the
+[serverless-web-app-template](https://github.com/majodali/serverless-web-app-template)
+layout (npm workspaces):
+
 ```
-index.html, css/, src/editor/   the editor shell (lit-html UI, no user code)
-        │  postMessage: load-project / run-executable
-        │              ready / loaded / console / data-change / ran
-        ▼
-runtime/page.html + runtime.js  the page realm (sandboxed iframe)
-├── evaluate.js                 acorn parse → with(scope) compile → invoke
-├── data.js                     DataComponent / DataRegistry (+computed)
-└── ui.js                       defineComponent (custom elements + lit-html)
-vendor/                         lit-html and acorn, vendored (buildless)
+frontend/
+├── index.html, src/editor/     the editor shell (lit-html UI, no user code)
+│           │  postMessage: load-project / run-executable
+│           │              ready / loaded / console / data-change / ran
+│           ▼
+└── public/                     served VERBATIM (never bundled):
+    ├── runtime/page.html + runtime.js   the page realm (sandboxed iframe)
+    │   ├── boot.js             shared boot core (also used by the viewer)
+    │   ├── evaluate.js         acorn parse → with(scope) compile → invoke
+    │   ├── data.js             DataComponent / DataRegistry (+computed)
+    │   └── ui.js               defineComponent (custom elements + lit-html)
+    └── vendor/                 lit-html and acorn for the page realm
+backend/                        Lambdas: site-wide auth (/auth/*) + page publishing
+├── src/viewer/ + scripts/      self-contained viewer template for published pages
+infra/                          AWS CDK: tables, API, hosting, admin seeding
 tests/smoke.js                  end-to-end test in headless Chromium
+.github/workflows/              CI (PR checks) and Deploy (OIDC, on main)
 ```
+
+The split matters: the **editor** is bundled by Vite like a normal app, but
+`frontend/public/runtime/` and `frontend/public/vendor/` are copied verbatim —
+the page realm loads them by URL on every reload, and **user executables can
+import them by URL too** (e.g. `import '../vendor/lit-html/lit-html.js'`), so
+they must stay plain ESM at stable, unhashed paths. The two realms each get
+their own lit-html instance, which is fine — they never share objects, only
+postMessage.
 
 Boot sequence on load/reload: render page HTML into the iframe → build the
 shared scope and inject the runtime API → create declared data components →
 run definition executables in order → attach handlers → report `loaded`.
+
+## Publishing and auth
+
+Signed-in users can **publish** a project from the editor toolbar: the backend
+renders it into a fully self-contained HTML file (runtime + lit-html + acorn +
+the project document inlined — no external dependencies, pages never break
+when the platform changes) and writes it to the site bucket at
+**`/p/<slug>/`**. Anyone can read published pages; only authenticated users
+can publish. A published page embeds its project document as JSON, so the
+editor can reopen any published URL for editing (`#open=/p/<slug>/`, or the
+"edit" button in the publish dialog). Slugs are owned by whoever published
+them first; a DynamoDB table tracks ownership and powers the "my pages" list.
+
+Auth is **site-wide**, not Contraption-specific: admin-created accounts
+(no signup), bcrypt password hashes, 30-day JWTs from app-neutral `/auth/*`
+routes, and the token is stored under an origin-wide localStorage key so
+future apps on the same domain share the session. The first admin is seeded
+at deploy from `ADMIN_USERNAME`/`ADMIN_PASSWORD`.
+
+Locally, the editor keeps **named project slots** (localStorage, one key per
+project, switcher in the toolbar). Creating a new project, importing a JSON
+file, and opening a published page all land in a *fresh* slot — existing work
+is never overwritten. The trash button deletes the current slot from the
+browser only; published copies are unaffected.
+
+> **Trust note:** published pages run arbitrary JavaScript on the site's
+> origin — the same origin as everyone's auth token. That's acceptable while
+> accounts are admin-created (publishers are trusted); serving published
+> pages from a separate sandbox origin is the roadmap item to revisit before
+> opening accounts more widely.
 
 ## Project document format
 
@@ -150,6 +208,19 @@ run definition executables in order → attach handlers → report `loaded`.
 
 ## Roadmap
 
+- **Loadable modules** — author reusable libraries in the editor and publish
+  them as real ES modules at `/m/<slug>.js` (same auth/ownership machinery as
+  pages). Consumption already works — executables can `import` any URL —
+  so the work is authoring, publishing, and versioning policy.
+- **TypeScript executables** — phase 1: per-executable `lang: "ts"` with
+  Sucrase type-stripping in front of the existing acorn transform; published
+  pages transpile at publish time so the viewer stays TS-free. Phase 2:
+  Monaco editor + TS language service for diagnostics/completions, with
+  synthesized ambient declarations for the runtime API and the shared
+  namespace.
+- **Sandbox origin for published pages** — serve `/p/*` from a separate
+  domain so page code can't read the site auth token (needed before accounts
+  go beyond trusted users).
 - **Canvas scene graph** — multiple graphic components per canvas with draw
   order, invalidation, and hit-testing so pointer events route to the right
   component. The interface will mirror `defineComponent`.
