@@ -15,7 +15,7 @@ can view, edit, and run live:
 - **UI components** — custom HTML elements rendered with lit-html, defined in
   executables and placed as tags in the page HTML.
 - **Custom components** — assemblies of the above wired together *(planned,
-  see roadmap)*.
+  [#6](https://github.com/majodali/workbench/issues/6))*.
 
 Data and UI components can be declared in the project document **or** created
 from executable code (`data(...)`, `computed(...)`, `defineComponent(...)`).
@@ -73,7 +73,8 @@ These were settled up front; the rest of the architecture follows from them.
    the clean-reset story — a fresh realm means custom elements can be
    re-registered and stale listeners vanish. (The iframe currently uses
    `sandbox="allow-scripts allow-same-origin"` so module scripts load from
-   the same static host; hard origin isolation is on the roadmap.)
+   the same static host; hard origin isolation is
+   [#9](https://github.com/majodali/workbench/issues/9).)
 
 4. **Client-only persistence, one JSON document per project.** The project —
    page HTML plus all component definitions, code as strings — is a single
@@ -206,33 +207,9 @@ browser only; published copies are unaffected.
 }
 ```
 
-## Roadmap
+## Backlog
 
-- **Loadable modules** — author reusable libraries in the editor and publish
-  them as real ES modules at `/m/<slug>.js` (same auth/ownership machinery as
-  pages). Consumption already works — executables can `import` any URL —
-  so the work is authoring, publishing, and versioning policy.
-- **TypeScript executables** — phase 1: per-executable `lang: "ts"` with
-  Sucrase type-stripping in front of the existing acorn transform; published
-  pages transpile at publish time so the viewer stays TS-free. Phase 2:
-  Monaco editor + TS language service for diagnostics/completions, with
-  synthesized ambient declarations for the runtime API and the shared
-  namespace.
-- **Sandbox origin for published pages** — serve `/p/*` from a separate
-  domain so page code can't read the site auth token (needed before accounts
-  go beyond trusted users).
-- **Canvas scene graph** — multiple graphic components per canvas with draw
-  order, invalidation, and hit-testing so pointer events route to the right
-  component. The interface will mirror `defineComponent`.
-- **Custom (composed) components** — instantiate a wired assembly of
-  components with per-instance state and namespaced inner identities; the
-  document format's `type` field anticipates this.
-- **Import maps** — project-level bare-specifier resolution for external
-  modules.
-- **Hard sandbox isolation** — opaque-origin iframe (or separate host) so
-  runaway user code cannot block the editor.
-- **Editor niceties** — CodeMirror with syntax highlighting, per-executable
-  console filtering, undo history/versioned saves, drag-to-reorder.
-- **Replaceable editor** — the editor already talks to the runtime only via
-  the message protocol; formalize it so custom editor UIs can be built from
-  the environment's own UI components.
+The roadmap lives in [GitHub Issues](https://github.com/majodali/workbench/issues)
+— one issue per feature with the design context and open decisions captured in
+the body. Work arrives by PR referencing its issue (`Closes #N`).
+
