@@ -18,16 +18,55 @@ import {
   serverError,
 } from "../lib/http";
 import { toPublicPage, type Page } from "../lib/types";
+import { transform } from "sucrase";
 
 // Lowercase letters/digits/hyphens, 2-63 chars, no leading/trailing hyphen.
 const SLUG_RE = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])$/;
 const MAX_PROJECT_BYTES = 1_000_000;
 
+interface ComponentDoc {
+  id?: string;
+  type?: string;
+  name?: string;
+  lang?: string;
+  code?: string;
+  tsCode?: string;
+  [key: string]: unknown;
+}
+
 interface ProjectDoc {
   name?: string;
   page?: { html?: string };
-  components?: unknown[];
+  components?: ComponentDoc[];
 }
+
+/**
+ * Published pages embed plain JS (the viewer bundle is TS-free): transpile
+ * TypeScript executables here, keeping the original source in `tsCode` so
+ * the editor round-trip restores it. Throws with the executable's name on
+ * TS syntax errors.
+ */
+function transpileProject(project: ProjectDoc): ProjectDoc {
+  const components = (project.components ?? []).map((c) => {
+    if (c?.type === "executable" && c.lang === "ts" && typeof c.code === "string") {
+      try {
+        const js = transform(c.code, {
+          transforms: ["typescript"],
+          disableESTransforms: true,
+        }).code;
+        return { ...c, code: js, tsCode: c.code };
+      } catch (err) {
+        throw new TranspileError(
+          `TypeScript error in "${c.name ?? c.id}": ${(err as Error).message}`
+        );
+      }
+    }
+    return c;
+  });
+  return { ...project, components };
+}
+
+class TranspileError extends Error {}
 
 export const handler: APIGatewayProxyHandlerV2 = async (
   event: APIGatewayProxyEventV2
@@ -59,7 +98,15 @@ export const handler: APIGatewayProxyHandlerV2 = async (
       return forbidden(`"${slug}" was published by another user`);
     }
 
-    await writePageObject(slug, renderPublishedPage(title, project));
+    let publishable: ProjectDoc;
+    try {
+      publishable = transpileProject(project);
+    } catch (err) {
+      if (err instanceof TranspileError) return badRequest(err.message);
+      throw err;
+    }
+
+    await writePageObject(slug, renderPublishedPage(title, publishable));
 
     const now = Date.now();
     const page: Page = {

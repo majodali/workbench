@@ -64,5 +64,14 @@ export async function fetchPublishedProject(path) {
     /<script type="application\/json" id="contraption-project">([\s\S]*?)<\/script>/
   );
   if (!match) throw new Error('That page does not contain an embedded Contraption project.');
-  return JSON.parse(match[1]);
+  const project = JSON.parse(match[1]);
+  // Published pages embed transpiled JS for TS executables (the viewer is
+  // TS-free) with the original source alongside — restore it for editing.
+  for (const c of project.components ?? []) {
+    if (c && typeof c.tsCode === 'string') {
+      c.code = c.tsCode;
+      delete c.tsCode;
+    }
+  }
+  return project;
 }

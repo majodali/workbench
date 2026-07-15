@@ -5,7 +5,7 @@ is a browser-based environment, in the spirit of coding notebooks, where each
 project is built around a **page**. The page is assembled from components you
 can view, edit, and run live:
 
-- **Executables** — editable JavaScript with three roles:
+- **Executables** — editable JavaScript or TypeScript with three roles:
   - **definitions** run on page load; every top-level declaration becomes
     visible to every other executable on the page,
   - **scripts** run manually from the editor,
@@ -98,6 +98,13 @@ where `scope` is a per-page object behind a `Proxy`:
   executables can import external modules by URL. Top-level `await` works.
 - If the last top-level statement is an expression, its value is echoed to
   the editor console, notebook-style.
+- Executables marked `lang: "ts"` are type-stripped with
+  [Sucrase](https://github.com/alangpierce/sucrase) (vendored, lazily loaded)
+  before the acorn transform — TS syntax runs, but nothing typechecks yet
+  (the language service is [#4](https://github.com/majodali/workbench/issues/4)).
+  Publishing transpiles TS at the API, embedding plain JS in the page (the
+  viewer stays TS-free) with the original source alongside as `tsCode`, so
+  reopening a published page for editing restores the TypeScript.
 
 Known limitations of this scheme (all reported as errors or documented):
 `'use strict'` prologues are unsupported (`with` is sloppy-mode); a top-level
